@@ -2,194 +2,273 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from backend.catalogos import LISTA_BANCOS
-from backend.procesador import procesar_txt_sib
+from backend.procesador import procesar_txt_sib, validar_reglas_sib, obtener_recomendacion
 
-# --- 1. CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(
-    page_title="BanCERT | Monitor Dinámico",
-    page_icon="🛡️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- TU API KEY ---
+MI_API_KEY = "AIzaSyC71imL8xiMrBCXLsgJ8IpA47c8jknZQX8"
 
-# --- 2. ESTILOS CSS ---
-st.markdown("""
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="BanCERT | Observatorio", page_icon="🛡️", layout="wide")
+
+# --- COLORES CORPORATIVOS (VARIABLES) ---
+COLOR_PRUSSIAN_BLUE = "#063A59"
+COLOR_CADET_GREY = "#8CA1B3"
+COLOR_BLACK = "#010101"
+COLOR_WHITE = "#FFFFFF"
+
+# --- ESTILOS CSS PERSONALIZADOS ---
+st.markdown(f"""
 <style>
-    .stApp { background-color: #F8F9FA; }
+    /* Importar Fuente Montserrat */
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap');
+
+    html, body, [class*="css"] {{
+        font-family: 'Montserrat', sans-serif;
+        color: {COLOR_BLACK};
+    }}
     
-    div[data-testid="stMetric"] {
-        background-color: #FFFFFF;
-        border: 1px solid #E0E0E0;
-        padding: 10px;
-        border-radius: 10px;
+    /* Fondo General */
+    .stApp {{
+        background-color: #F4F6F8;
+    }}
+
+    /* Estilo de las Métricas (Tarjetas) para que sean iguales */
+    div[data-testid="stMetric"] {{
+        background-color: {COLOR_WHITE};
+        border: 1px solid {COLOR_CADET_GREY};
+        border-radius: 8px;
+        padding: 20px 15px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         text-align: center;
-        transition: transform 0.2s;
-        min-height: 120px;
+        height: 160px; /* Altura fija para alineación */
         display: flex;
         flex-direction: column;
         justify_content: center;
-    }
-    
-    div[data-testid="stMetric"]:hover {
-        transform: scale(1.02);
-        box-shadow: 0 6px 8px rgba(0,0,0,0.1);
-    }
-    
-    div[data-testid="stMetricValue"] {
-        font-size: 22px !important;
-        word-wrap: break-word !important;
-        white-space: normal !important;
-        line-height: 1.2 !important;
-    }
+        align-items: center;
+    }}
 
-    h1, h2, h3 { color: #0F2537; font-family: 'Segoe UI', sans-serif; }
+    /* Títulos de las métricas */
+    div[data-testid="stMetricLabel"] p {{
+        font-size: 14px !important;
+        font-weight: 600;
+        color: {COLOR_CADET_GREY} !important;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }}
+
+    /* Valores de las métricas */
+    div[data-testid="stMetricValue"] div {{
+        font-size: 28px !important;
+        font-weight: 700;
+        color: {COLOR_PRUSSIAN_BLUE} !important;
+    }}
+
+    /* Títulos Principales */
+    h1, h2, h3 {{
+        color: {COLOR_PRUSSIAN_BLUE} !important;
+        font-weight: 700;
+    }}
+
+    /* Barra Lateral */
+    section[data-testid="stSidebar"] {{
+        background-color: {COLOR_WHITE};
+        border-right: 2px solid {COLOR_CADET_GREY};
+    }}
     
-    section[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E0E0E0; }
+    /* Botones y Widgets */
+    .stSelectbox label, .stFileUploader label, .stMultiSelect label {{
+        color: {COLOR_PRUSSIAN_BLUE};
+        font-weight: 600;
+    }}
+    
+    /* Botón de descarga */
+    button[data-testid="baseButton-secondary"] {{
+        border-color: {COLOR_PRUSSIAN_BLUE};
+        color: {COLOR_PRUSSIAN_BLUE};
+    }}
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. BARRA LATERAL ---
+# --- BARRA LATERAL ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2092/2092663.png", width=80)
-    st.markdown("## **BanCERT** Control Panel")
+    st.image("https://cdn-icons-png.flaticon.com/512/2092/2092663.png", width=70)
+    st.markdown(f"<h3 style='color:{COLOR_PRUSSIAN_BLUE};'>BanCERT Panel</h3>", unsafe_allow_html=True)
     st.markdown("---")
-    st.caption("CONFIGURACIÓN DE ENTIDAD")
-    banco_seleccionado = st.selectbox("🏦 Seleccionar Banco:", LISTA_BANCOS)
+    banco_seleccionado = st.selectbox("🏦 Entidad Bancaria:", LISTA_BANCOS)
     st.write("")
-    st.caption("FUENTE DE DATOS")
-    archivo_cargado = st.file_uploader("Subir Reporte SIB (.txt)", type=['txt'])
-    st.markdown("---")
-    st.info("ℹ️ **Privacidad:** Procesamiento local.")
-
-# --- 4. CUERPO PRINCIPAL ---
-with st.container():
-    col_logo, col_titulo = st.columns([1, 10])
-    with col_logo: st.write("")
-    with col_titulo:
-        st.title(f"🛡️ Monitor Dinámico: {banco_seleccionado}")
-        st.markdown(f"**Validación de Normativa SIB** | Fecha: *{pd.Timestamp.now().strftime('%d/%m/%Y')}*")
-
-if archivo_cargado is not None:
-    # Procesar archivo
-    df = procesar_txt_sib(archivo_cargado)
-
-    if not df.empty:
-        st.write("")
-        
-        # --- KPIs ---
-        col1, col2, col3, col4 = st.columns(4)
-        total = df['Cantidad'].sum()
-        criticos = df[df['Criticidad'] == 'Crítico']['Cantidad'].sum()
-        
-        if not df.empty:
-            top_vector = df.groupby('Tipo de Ataque')['Cantidad'].sum().idxmax()
-        else:
-            top_vector = "N/A"
-            
-        paises = df['País'].nunique()
-        
-        col1.metric("🛡️ Intentos Bloqueados", f"{total:,.0f}")
-        col2.metric("🚨 Incidentes Críticos", f"{criticos}", delta="Atención", delta_color="inverse")
-        col3.metric("🌍 Orígenes Únicos", f"{paises}")
-        col4.metric("🔥 Vector Principal", top_vector)
-
+    
+    # --- 1. CARGA MASIVA (accept_multiple_files=True) ---
+    archivos = st.file_uploader("📂 Cargar Reportes SIB (.txt)", type=['txt'], accept_multiple_files=True)
+    
+    if archivos:
+        st.success(f"✅ {len(archivos)} archivos cargados.")
         st.markdown("---")
+    
+    st.caption(f"© 2026 BanCERT | Seguridad SIB")
 
-        # --- GRÁFICAS ANIMADAS ---
-        
-        # COLUMNA 1: BARRAS (Con potencial de animación temporal)
-        c_chart1, c_chart2 = st.columns([2, 1])
+# --- APP PRINCIPAL ---
+# Título con estilo personalizado
+st.markdown(f"<h1 style='text-align: left; color: {COLOR_PRUSSIAN_BLUE};'>🛡️ Observatorio de Amenazas</h1>", unsafe_allow_html=True)
+st.markdown(f"<p style='color: {COLOR_CADET_GREY}; font-size: 18px;'>Monitor de Ciberseguridad: <b>{banco_seleccionado}</b></p>", unsafe_allow_html=True)
+st.markdown("---")
 
-        with c_chart1:
-            st.subheader("📊 Top Vectores (Evolución)")
+if archivos:
+    # --- PROCESAMIENTO MULTI-ARCHIVO ---
+    lista_dfs = []
+    
+    # Barra de progreso visual
+    if len(archivos) > 1:
+        bar = st.progress(0)
+    
+    for i, archivo_individual in enumerate(archivos):
+        df_temp = procesar_txt_sib(archivo_individual)
+        lista_dfs.append(df_temp)
+        if len(archivos) > 1:
+            bar.progress((i + 1) / len(archivos))
             
-            # Verificamos si hay múltiples fechas para activar la animación "PLAY"
-            if df['Fecha'].nunique() > 1:
-                st.caption("💡 Dale al botón ▶️ 'Play' abajo a la izquierda para ver la evolución por días.")
-                # Agrupamos por Fecha y Tipo
-                data_bar = df.groupby(['Fecha', 'Tipo de Ataque'])['Cantidad'].sum().reset_index()
-                # Ordenamos por fecha para que la animación sea correcta
-                data_bar = data_bar.sort_values('Fecha')
+    # Unir todos
+    if lista_dfs:
+        df_raw = pd.concat(lista_dfs, ignore_index=True)
+    else:
+        df_raw = pd.DataFrame()
+
+    if not df_raw.empty:
+        
+        # --- 2. FILTROS INTERACTIVOS (SIDEBAR) ---
+        with st.sidebar:
+            st.subheader("🔍 Filtros")
+            
+            # Filtro Criticidad
+            opciones_crit = df_raw['Criticidad'].unique().tolist()
+            sel_crit = st.multiselect("Nivel de Criticidad:", opciones_crit, default=opciones_crit)
+            
+            # Filtro Detector
+            opciones_tool = df_raw['Herramienta'].unique().tolist()
+            sel_tool = st.multiselect("Detector:", opciones_tool, default=opciones_tool)
+            
+        # Aplicar filtros
+        df = df_raw[
+            (df_raw['Criticidad'].isin(sel_crit)) & 
+            (df_raw['Herramienta'].isin(sel_tool))
+        ]
+        
+        if df.empty:
+            st.warning("⚠️ Los filtros seleccionados no devolvieron datos. Intenta seleccionar más opciones.")
+        else:
+            # --- SECCIÓN 1: KPIs (TARJETAS UNIFORMES) ---
+            c1, c2, c3, c4 = st.columns(4)
+            
+            total = df['Cantidad'].sum()
+            criticos = df[df['Criticidad']=='Crítico']['Cantidad'].sum()
+            paises = df['País'].nunique()
+            
+            # Lógica Top Vector
+            top_df = df.groupby('Tipo de Ataque')['Cantidad'].sum().reset_index().sort_values('Cantidad', ascending=False)
+            if not top_df.empty:
+                top_name = top_df.iloc[0]['Tipo de Ataque']
+                # Acortar nombre si es muy largo
+                if len(top_name) > 20: top_name = top_name[:18] + "..."
+                
+                # Datos para IA (basado en lo filtrado)
+                top_code_ia = df.groupby('Código Ataque')['Cantidad'].sum().idxmax()
+                top_qty_ia = df.groupby('Código Ataque')['Cantidad'].sum().max()
+                top_pais_ia = df[df['Código Ataque']==top_code_ia]['País'].mode()[0]
+            else:
+                top_name, top_code_ia, top_qty_ia, top_pais_ia = "N/A", "0000", 0, "N/A"
+
+            c1.metric("Intentos Bloqueados", f"{total:,.0f}")
+            c2.metric("Incidentes Críticos", f"{criticos}")
+            c3.metric("Orígenes Únicos", f"{paises}")
+            c4.metric("Vector Principal", top_name)
+            
+            st.write("") # Espacio
+
+            # --- SECCIÓN 2: AUDITORÍA Y CISO ---
+            col_aud, col_ia = st.columns(2)
+            
+            with col_aud:
+                st.markdown(f"<h4 style='color:{COLOR_PRUSSIAN_BLUE}'>👮 Auditoría Normativa SIB</h4>", unsafe_allow_html=True)
+                # Validamos sobre el RAW (completo) para no esconder errores con filtros
+                errs = validar_reglas_sib(df_raw)
+                if not errs:
+                    st.success(f"✅ **APROBADO:** Los {len(archivos)} archivos cumplen con la estructura SIB.")
+                else:
+                    for e in errs:
+                        if "CRÍTICO" in e: st.error(e)
+                        else: st.warning(e)
+
+            with col_ia:
+                st.markdown(f"<h4 style='color:{COLOR_PRUSSIAN_BLUE}'>🧠 CISO Advisor (IA)</h4>", unsafe_allow_html=True)
+                with st.spinner("Analizando datos filtrados..."):
+                    consejo = obtener_recomendacion(top_code_ia, MI_API_KEY, top_qty_ia, top_pais_ia)
+                st.info(consejo)
+
+            st.markdown("---")
+            
+            # --- SECCIÓN 3: GRÁFICAS ---
+            PALETA_BANCERT = [COLOR_PRUSSIAN_BLUE, COLOR_CADET_GREY, "#5D7485", "#2C5169", "#AABBC9"]
+            
+            c_graf1, c_graf2 = st.columns([2, 1])
+
+            with c_graf1:
+                st.subheader("📊 Top 10 Vectores de Ataque")
+                bar_data = df.groupby('Tipo de Ataque')['Cantidad'].sum().reset_index().sort_values('Cantidad', ascending=True).tail(10)
                 
                 fig_bar = px.bar(
-                    data_bar, 
+                    bar_data, 
                     x='Cantidad', 
                     y='Tipo de Ataque', 
                     orientation='h', 
-                    color='Cantidad',
-                    animation_frame="Fecha",   # <--- ESTO CREA LA ANIMACIÓN DE TIEMPO
-                    range_x=[0, data_bar['Cantidad'].max()*1.1], # Fija el eje X para que no salte
-                    color_continuous_scale='Blues'
+                    text_auto=True,
+                    color_discrete_sequence=[COLOR_PRUSSIAN_BLUE]
                 )
-            else:
-                # Si es un solo día, mostramos la estática normal
-                data_bar = df.groupby('Tipo de Ataque')['Cantidad'].sum().reset_index().sort_values('Cantidad', ascending=True).tail(10)
-                fig_bar = px.bar(
-                    data_bar, 
-                    x='Cantidad', 
-                    y='Tipo de Ataque', 
-                    orientation='h', 
-                    text='Cantidad',
-                    color='Cantidad',
-                    color_continuous_scale='Blues'
+                fig_bar.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font={'family': "Montserrat"},
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(showgrid=False)
                 )
-            
-            fig_bar.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_bar, use_container_width=True)
+                st.plotly_chart(fig_bar, use_container_width=True)
 
-        # COLUMNA 2: SUNBURST (La "Joya" interactiva)
-        with c_chart2:
-            st.subheader("🧬 Análisis de Profundidad")
-            st.caption("👆 Haz clic en los anillos interiores para expandir.")
-            
-            # [cite_start]Gráfico SOLAR (Sunburst) [cite: 5]
-            # Muestra jerarquía: Herramienta -> Criticidad -> Ataque
-            fig_sun = px.sunburst(
-                df, 
-                path=['Herramienta', 'Criticidad', 'Tipo de Ataque'], 
-                values='Cantidad',
-                color='Criticidad',
-                color_discrete_map={
-                    'Crítico': '#FF4B4B', 
-                    'Alta': '#FFA15A', 
-                    'Media': '#FFD700', 
-                    'Baja': '#00CC96', 
-                    'Informativo': '#636EFA'
-                }
-            )
-            fig_sun.update_layout(
-                margin=dict(t=0, l=0, r=0, b=0),
-                paper_bgcolor="rgba(0,0,0,0)"
-            )
-            st.plotly_chart(fig_sun, use_container_width=True)
+            with c_graf2:
+                st.subheader("🛡️ Detección")
+                fig_sun = px.sunburst(
+                    df, 
+                    path=['Herramienta', 'Criticidad'], 
+                    values='Cantidad',
+                    color_discrete_sequence=PALETA_BANCERT
+                )
+                fig_sun.update_layout(font={'family': "Montserrat"})
+                st.plotly_chart(fig_sun, use_container_width=True)
 
-        # --- MAPA DE CALOR ---
-        st.subheader("🌡️ Mapa de Calor: Intensidad")
-        try:
-            heatmap_data = df.groupby(['Criticidad', 'Tipo de Ataque'])['Cantidad'].sum().reset_index()
-            fig_heat = px.density_heatmap(
-                heatmap_data, 
-                x="Criticidad", 
-                y="Tipo de Ataque", 
-                z="Cantidad", 
-                text_auto=True,
-                color_continuous_scale="Viridis" 
-            )
-            fig_heat.update_layout(plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_heat, use_container_width=True)
-        except:
-            st.info("Faltan datos.")
+            # Mapa de Calor
+            st.subheader("🌡️ Mapa de Calor: Riesgo vs Vector")
+            try:
+                heat_data = df.groupby(['Criticidad', 'Tipo de Ataque'])['Cantidad'].sum().reset_index()
+                fig_heat = px.density_heatmap(
+                    heat_data, x="Criticidad", y="Tipo de Ataque", z="Cantidad", text_auto=True,
+                    color_continuous_scale="Blues"
+                )
+                fig_heat.update_layout(font={'family': "Montserrat"})
+                st.plotly_chart(fig_heat, use_container_width=True)
+            except:
+                pass
+                
+            # --- 3. BOTÓN DE EXPORTAR ---
+            with st.expander("📂 Ver Datos y Descargar"):
+                st.dataframe(df, use_container_width=True)
+                
+                # Convertir a CSV
+                csv = df.to_csv(index=False).encode('utf-8')
+                
+                st.download_button(
+                    label="📥 Descargar Reporte Ejecutivo (CSV)",
+                    data=csv,
+                    file_name=f"Reporte_BanCERT_{banco_seleccionado}.csv",
+                    mime='text/csv',
+                )
 
-        # --- TABLA ---
-        with st.expander("📂 Ver Auditoría de Registros"):
-            st.dataframe(df, use_container_width=True)
-            
     else:
-        st.error("Archivo vacío o formato incorrecto.")
+        st.error("⚠️ El archivo cargado no contiene datos válidos o legibles.")
 else:
-    st.markdown("""
-    <div style='text-align: center; padding: 50px;'>
-        <h2 style='color: #cccccc;'>Esperando archivo...</h2>
-    </div>
-    """, unsafe_allow_html=True)
+    st.info("👈 Carga uno o varios reportes .TXT en la barra lateral para comenzar.")
